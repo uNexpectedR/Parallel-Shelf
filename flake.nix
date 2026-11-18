@@ -84,15 +84,15 @@
                 mf = json.load(tar.extractfile("manifest.json"))
                 if mf.get("type") != "ui_qml":
                     raise SystemExit("manifest type is %r, want ui_qml" % (mf.get("type"),))
-                if mf.get("version") != "1.0.4":
-                    raise SystemExit("manifest version is %r, want 1.0.4" % (mf.get("version"),))
+                if mf.get("version") != "0.1.0":
+                    raise SystemExit("manifest version is %r, want 0.1.0" % (mf.get("version"),))
                 main = mf.get("main")
                 if main not in (None, "", {}):
                     raise SystemExit("manifest main must be empty for in-process QML open, got %r" % (main,))
                 deps = mf.get("dependencies") or []
                 if "parallel_shelf_core" not in deps:
                     raise SystemExit("view must depend on parallel_shelf_core, got %r" % (deps,))
-                print("openLgx type=ui_qml version=1.0.4 main=empty native=0 qml=" + qml_main[0], file=sys.stderr)
+                print("openLgx type=ui_qml version=0.1.0 main=empty native=0 qml=" + qml_main[0], file=sys.stderr)
           '';
           extractVariant = ''
             variant=$(tar -tzf "$work/pkg.lgx" \

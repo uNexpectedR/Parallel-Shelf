@@ -26,7 +26,7 @@ test("core is its own type:core package at the same version as the view", () => 
   assert.equal(core.interface, "universal")
   assert.equal(core.main, "parallel_shelf_core_plugin")
   assert.equal(core.version, view.version)
-  assert.equal(view.version, "1.0.4")
+  assert.equal(view.version, "0.1.0")
 })
 
 test("the view still calls logos.callModuleAsync on parallel_shelf_core", () => {

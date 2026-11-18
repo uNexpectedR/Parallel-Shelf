@@ -1,7 +1,7 @@
 {
   "name": "parallel_shelf_core",
   "display_name": "Parallel Shelf Core",
-  "version": "1.0.4",
+  "version": "0.1.0",
   "type": "core",
   "interface": "universal",
   "category": "books",

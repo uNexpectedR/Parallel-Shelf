@@ -3,7 +3,7 @@
 # qmltestrunner helper under tests/TestFileBytes. Not packed in the lgx.
 stdenv.mkDerivation {
   pname = "filebytesplugin";
-  version = "1.0.4";
+  version = "0.1.0";
   src = ../.;
 
   nativeBuildInputs = [ cmake qt6.qtbase ];

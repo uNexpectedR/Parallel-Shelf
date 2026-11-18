@@ -1,0 +1,9 @@
+TEMPLATE = lib
+CONFIG += plugin
+QT += qml gui
+QT -= widgets
+TARGET = filebytesplugin
+DESTDIR = $$PWD
+INCLUDEPATH += ../../src ../../core/src
+HEADERS += ../../src/filebytes.h
+SOURCES += ../../src/filebytes.cpp plugin.cpp

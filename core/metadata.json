@@ -1,0 +1,26 @@
+{
+  "name": "parallel_shelf_core",
+  "display_name": "Parallel Shelf Core",
+  "version": "1.0.4",
+  "type": "core",
+  "interface": "universal",
+  "category": "books",
+  "description": "Reads a file Parallel Shelf already listed, in a Logos host process. The view stays ui_qml.",
+  "main": "parallel_shelf_core_plugin",
+  "icon": "icon.png",
+  "include": ["pdftoppm"],
+  "dependencies": [],
+  "nix": {
+    "packages": {
+      "build": ["qt6.qtbase"],
+      "runtime": ["poppler_utils"]
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": ["src/page_render.h"],
+      "extra_include_dirs": [],
+      "extra_link_libraries": []
+    }
+  }
+}

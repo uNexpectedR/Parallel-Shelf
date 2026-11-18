@@ -1,0 +1,16 @@
+name: Rebuild index
+
+# Rewrites index.json, the list of published versions that Basecamp reads.
+# The release workflow starts this when it has finished.
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [rebuild-index]
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    uses: logos-co/logos-modules-release-action/.github/workflows/rebuild-index.yml@bbdc52871dc4305c8007923e1b08738ad2dd6b50

@@ -1,0 +1,3 @@
+module Qt.labs.platform
+singleton StandardPaths 1.0 StandardPaths.qml
+singleton StandardPaths 1.1 StandardPaths.qml

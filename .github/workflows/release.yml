@@ -1,0 +1,49 @@
+name: Release
+
+# Builds the Basecamp packages and publishes them as GitHub releases. Runs
+# when either module version in metadata.json changes, or by hand from the
+# Actions tab. A version that is already published is skipped.
+#
+# Two packages, same as backpack_ui + backpack_core: the ui_qml view
+# (parallel_shelf) and the type:core QFile module (parallel_shelf_core).
+# Basecamp resolves the view's dependency from this repo's index, so core
+# must be its own <module>-v<version> release. rebuild-index walks every
+# release in the repo and lists both.
+#
+# Each platform is built on its own machine. If one fails, the other is still
+# published. Core is released first so the view's dependency exists before
+# the view is indexed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: Platforms to build
+        type: choice
+        default: darwin-arm64,linux-amd64
+        options:
+          - darwin-arm64,linux-amd64
+          - darwin-arm64
+          - linux-amd64
+  push:
+    branches: [main]
+    paths: [metadata.json, core/metadata.json]
+
+permissions:
+  contents: write
+
+jobs:
+  release-core:
+    # The official Logos release workflow, pinned to the commit behind v1.8.
+    uses: logos-co/logos-modules-release-action/.github/workflows/release.yml@bbdc52871dc4305c8007923e1b08738ad2dd6b50
+    with:
+      module_path: core
+      variants: ${{ inputs.variants || 'darwin-arm64,linux-amd64' }}
+      signing_mode: none
+  release:
+    needs: release-core
+    uses: logos-co/logos-modules-release-action/.github/workflows/release.yml@bbdc52871dc4305c8007923e1b08738ad2dd6b50
+    with:
+      module_path: .
+      variants: ${{ inputs.variants || 'darwin-arm64,linux-amd64' }}
+      signing_mode: none

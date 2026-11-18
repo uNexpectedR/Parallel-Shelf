@@ -1,0 +1,3 @@
+module TestFileBytes
+plugin filebytesplugin
+classname FileBytesPlugin

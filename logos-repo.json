@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "name": "parallel-shelf",
+  "displayName": "Parallel Shelf",
+  "description": "A public library for Logos Basecamp. Anyone can add a book or an audiobook.",
+  "homepage": "https://github.com/uNexpectedR/Parallel-Shelf",
+  "indexUrl": "https://github.com/uNexpectedR/Parallel-Shelf/releases/download/index/index.json"
+}

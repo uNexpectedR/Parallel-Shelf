@@ -1,0 +1,26 @@
+name: Rerun failed jobs
+
+# PAT used by automation often has Contents but not Actions write.
+# This workflow uses GITHUB_TOKEN to re-run failed jobs on a prior release run.
+on:
+  repository_dispatch:
+    types: [rerun-failed-jobs]
+
+permissions:
+  actions: write
+
+jobs:
+  rerun:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.client_payload.run_id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RUN_ID}" ]]; then
+            echo "::error::client_payload.run_id is required"
+            exit 1
+          fi
+          gh run rerun "${RUN_ID}" --failed --repo "${GITHUB_REPOSITORY}"

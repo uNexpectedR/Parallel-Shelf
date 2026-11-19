@@ -1359,6 +1359,22 @@ Item {
         var work = openingWork
         if (!work) return
         log("open timeout cid=" + work.cid)
+        var dest = destPath(work)
+        if (dest && dest.charAt(0) === "/" && files && typeof files.probe === "function") {
+            files.probe(dest, function (n) {
+                if (!openingWork || openingWork.cid !== work.cid) return
+                if (n > 1000) {
+                    log("open timeout dest cid=" + work.cid + " n=" + n)
+                    openFromDest(work, dest)
+                    return
+                }
+                if (holdLoading) return
+                if (job && job.work && job.work.cid === work.cid) return
+                fetchFailed(work, isMine(work) ? Catalog.CHOOSE_AGAIN
+                            : "Logos Storage did not answer in time.")
+            })
+            return
+        }
         if (holdLoading) return
         if (job && job.work && job.work.cid === work.cid) return
         fetchFailed(work, isMine(work) ? Catalog.CHOOSE_AGAIN
@@ -1664,9 +1680,21 @@ Item {
             return
         }
         // Do not wait on hung QtRO mkdir. downloadToUrl writes the dest
-        // file; the sidecar rasters from that path.
+        // file. If that dest is already a PDF, skip Storage and open it.
         if (files && typeof files.ensureDir === "function") {
             try { files.ensureDir(dest, function () {}) } catch (e) {}
+        }
+        if (files && typeof files.probe === "function") {
+            files.probe(dest, function (n) {
+                if (!openingWork || openingWork.cid !== work.cid) return
+                if (n > 1000) {
+                    log("open dest already cid=" + work.cid + " n=" + n)
+                    openFromDest(work, dest)
+                    return
+                }
+                queueMusterFetch(work, dest)
+            })
+            return
         }
         queueMusterFetch(work, dest)
     }

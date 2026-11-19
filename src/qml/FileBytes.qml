@@ -368,12 +368,63 @@ Item {
         onSourceSizeChanged: files._countReady()
     }
 
+    function finishCount(n, via) {
+        var job = files.countJob
+        n = Math.floor(Number(n) || 0)
+        if (!job || n < 1) return
+        files.countJob = null
+        countPoll.stop()
+        countMark.source = ""
+        console.log("parallel-shelf: pageCount " + n + " cid=" + job.cid
+                    + " via=" + (via || "marker") + " rel=" + job.rel)
+        if (typeof job.done === "function")
+            job.done(n)
+    }
+
+    // Dest PDF is already on disk. Count pages with core readPiece so Open
+    // does not wait forever for a sidecar count-<cid>.png.
+    function countPdfOnDisk(path, done) {
+        if (typeof done !== "function") return
+        path = Catalog.pathOf(path)
+        if (!path || path.charAt(0) !== "/") {
+            done(0)
+            return
+        }
+        files.probe(path, function (size) {
+            if (!(size > 1000)) {
+                done(0)
+                return
+            }
+            var at = 0
+            var parts = []
+            var take = Catalog.BLOCK
+            function step() {
+                if (at >= size) {
+                    done(Catalog.pdfPageCount(parts.join("")))
+                    return
+                }
+                files.readPiece(path, at, Math.min(take, size - at), function (piece) {
+                    if (!piece || !piece.length) {
+                        done(Catalog.pdfPageCount(parts.join("")))
+                        return
+                    }
+                    parts.push(piece)
+                    at += piece.length
+                    step()
+                })
+            }
+            step()
+        })
+    }
+
     function readPageCount(cid, disk, done) {
         var key = Catalog.holdName(cid)
         var rel = files.countRel(cid)
         console.log("parallel-shelf: count wanted " + key + " " + (disk || "") + " rel=" + rel)
-        files.countJob = { cid: cid, key: key, disk: disk || "", done: done, rel: rel, tries: 0 }
+        files.countJob = { cid: cid, key: key, disk: disk || "", done: done, rel: rel, tries: 0, diskAsked: false }
         countMark.source = ""
+        if (disk)
+            files.countPdfOnDisk(disk, function (n) { files.finishCount(n, "dest") })
         countPoll.restart()
     }
 
@@ -382,13 +433,7 @@ Item {
         if (!job) return
         if (countMark.status !== Image.Ready) return
         var n = Math.floor(Number(countMark.sourceSize.width) || Number(countMark.implicitWidth) || 0)
-        if (n < 1) return
-        files.countJob = null
-        countPoll.stop()
-        countMark.source = ""
-        console.log("parallel-shelf: pageCount " + n + " cid=" + job.cid + " rel=" + job.rel)
-        if (typeof job.done === "function")
-            job.done(n)
+        files.finishCount(n)
     }
 
     Timer {
@@ -401,6 +446,10 @@ Item {
             job.tries++
             if (job.tries > 0 && job.tries % 40 === 0)
                 console.log("parallel-shelf: pageCount wait cid=" + job.cid + " tries=" + job.tries)
+            if (job.disk && !job.diskAsked && job.tries >= 4) {
+                job.diskAsked = true
+                files.countPdfOnDisk(job.disk, function (n) { files.finishCount(n, "dest") })
+            }
             var rel = job.rel
             if (!rel || rel.indexOf("count-") !== 0) {
                 countPoll.restart()

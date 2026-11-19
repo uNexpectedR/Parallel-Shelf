@@ -117,16 +117,33 @@ function pdfPageCount(bytes) {
     var n = 0
     var i = 0
     while (i < s.length) {
-        var at = s.indexOf("/Type/Page", i)
+        var at = s.indexOf("/Type", i)
         if (at < 0) break
-        if (s.substring(at, at + 11) === "/Type/Pages") {
-            i = at + 11
+        var j = at + 5
+        while (j < s.length) {
+            var ch = s.charAt(j)
+            if (ch !== " " && ch !== "\t" && ch !== "\n" && ch !== "\r")
+                break
+            j++
+        }
+        if (s.charAt(j) !== "/") {
+            i = at + 5
             continue
         }
-        n++
-        i = at + 10
+        j++
+        if (s.substring(j, j + 5) === "Pages") {
+            i = j + 5
+            continue
+        }
+        if (s.substring(j, j + 4) === "Page") {
+            n++
+            i = j + 4
+            continue
+        }
+        i = at + 5
     }
-    return n > 0 ? n : 1
+    // 0 means unknown — callers must not treat it as a 1-page book.
+    return n
 }
 
 function pdfPages(bytes) {

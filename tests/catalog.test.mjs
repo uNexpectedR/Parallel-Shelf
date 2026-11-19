@@ -92,8 +92,9 @@ test("Storage events unwrap from a string, a list, or the object", () => {
 test("a PDF in memory becomes reader pages without a dest file", () => {
   assert.equal(c.isPdf("%PDF-1.4 x"), true)
   assert.equal(c.isPdf("not a pdf"), false)
-  assert.equal(c.pdfPageCount("%PDF-1.4 no pages"), 1)
+  assert.equal(c.pdfPageCount("%PDF-1.4 no pages"), 0)
   assert.equal(c.pdfPageCount("%PDF-1.4 /Type/Pages /Type/Page /Type/Page"), 2)
+  assert.equal(c.pdfPageCount("%PDF-1.4 /Type /Page /Type /Pages /Type /Page"), 2)
   assert.equal(c.pdfPages("%PDF-1.4 /Type/Page").length, 1)
   assert.equal(c.b64encode("Man"), "TWFu")
   assert.equal(c.pdfDataUrl("%PDF-x").indexOf("data:application/pdf;base64,"), 0)

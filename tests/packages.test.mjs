@@ -26,7 +26,7 @@ test("core is its own type:core package at the same version as the view", () => 
   assert.equal(core.interface, "universal")
   assert.equal(core.main, "parallel_shelf_core_plugin")
   assert.equal(core.version, view.version)
-  assert.equal(view.version, "0.1.1")
+  assert.equal(view.version, "0.1.2")
 })
 
 test("the view still calls logos.callModuleAsync on parallel_shelf_core", () => {
@@ -346,6 +346,10 @@ test("Open retrieves with downloadToUrl, Share uses uploadUrl like muster", () =
   assert.match(qml, /readHold/)
   assert.match(qml, /dest skip core/)
   assert.match(qml, /function readPageCount/)
+  assert.match(qml, /function countPdfOnDisk/)
+  assert.match(qml, /finishCount/)
+  assert.match(library, /open dest already/)
+  assert.match(library, /open timeout dest/)
   assert.match(qml, /count-" \+ key \+ "\.png/)
   assert.match(qml, /sourceSize.width/)
   assert.doesNotMatch(qml, /nameFilters: \["count-\*\.png"\]/)

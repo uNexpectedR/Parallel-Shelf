@@ -2,7 +2,7 @@
 
 A public library that runs in [Logos Basecamp](https://github.com/logos-co/logos-basecamp). Anyone can add books and audiobooks.
 
-It starts empty. There are no sample books in the app or in this repository. The published packages are **0.1.1** (view and core). Settings epoch stays `parallel_shelf_v1` / `1.0.0` so existing shelves are not wiped. Files live on Logos Storage. Logos Delivery tells other installs that something was added. Books stay with the people who add them.
+It starts empty. There are no sample books in the app or in this repository. The published packages are **0.1.2** (view and core). Settings epoch stays `parallel_shelf_v1` / `1.0.0` so existing shelves are not wiped. Files live on Logos Storage. Logos Delivery tells other installs that something was added. Books stay with the people who add them.
 
 The room has two shelves:
 

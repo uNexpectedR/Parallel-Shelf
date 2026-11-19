@@ -1403,6 +1403,15 @@ Item {
         if (!work) return
         log("open timeout cid=" + work.cid)
         var dest = destPath(work)
+        // Counting a dest PDF takes longer than 1.8s. Do not restart the
+        // count job — that wipes count-<cid>.png loads and never finishes.
+        if (files && files.countJob && files.countJob.cid === work.cid) {
+            log("open timeout wait count cid=" + work.cid
+                + " tries=" + files.countJob.tries)
+            openWatch.interval = 12000
+            openWatch.restart()
+            return
+        }
         // Core fileSize often returns -1 for a dest that is already on
         // this machine. Count that dest instead of waiting on count-*.png.
         if (dest && dest.charAt(0) === "/" && !Catalog.isGlobalTmp(dest)) {
@@ -1688,6 +1697,7 @@ Item {
             if (n < 1)
                 return
             holdLoading = false
+            openWatch.interval = 1800
             var stub = "%PDF-1.4\n"
             var i
             for (i = 0; i < n; i++) stub += "/Type/Page\n"
@@ -1700,7 +1710,13 @@ Item {
         }
         holdLoading = true
         openingWork = work
+        openWatch.interval = 12000
         openWatch.restart()
+        if (files && files.countJob && files.countJob.cid === work.cid
+                && files.countJob.disk === dest) {
+            log("open dest count wait cid=" + work.cid)
+            return
+        }
         if (files && typeof files.remember === "function" && work.size > 1000)
             files.remember(dest, work.size)
         if (files && typeof files.rememberSource === "function")

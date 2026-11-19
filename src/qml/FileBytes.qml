@@ -378,7 +378,12 @@ Item {
     function finishCount(n, via) {
         var job = files.countJob
         n = Math.floor(Number(n) || 0)
-        if (!job || n < 1) return
+        if (!job) return
+        if (n < 1) {
+            console.log("parallel-shelf: pageCount 0 cid=" + job.cid
+                        + " via=" + (via || "marker") + " rel=" + job.rel)
+            return
+        }
         files.countJob = null
         countPoll.stop()
         countMark.source = ""
@@ -388,8 +393,9 @@ Item {
             job.done(n)
     }
 
-    // Dest PDF is already on disk. Count pages with core readPiece so Open
-    // does not wait forever for a sidecar count-<cid>.png.
+    // Dest PDF is already on disk. Count /Type /Page in each readPiece so
+    // Open does not wait forever for a sidecar count-<cid>.png and does not
+    // concatenate the whole file in QML.
     function countPdfOnDisk(path, done) {
         if (typeof done !== "function") return
         path = Catalog.pathOf(path)
@@ -399,10 +405,12 @@ Item {
         }
         var known = files.fileSize(path)
         var at = 0
-        var parts = []
+        var pages = 0
+        var tail = ""
         var take = Catalog.BLOCK
+        var first = true
         function finish() {
-            done(Catalog.pdfPageCount(parts.join("")))
+            done(pages)
         }
         function step() {
             var n = known > 1000 ? Math.min(take, known - at) : take
@@ -419,12 +427,22 @@ Item {
                     finish()
                     return
                 }
-                if (at === 0 && String(piece).indexOf("%PDF-") !== 0) {
-                    done(0)
-                    return
+                if (first) {
+                    first = false
+                    if (String(piece).indexOf("%PDF-") !== 0) {
+                        done(0)
+                        return
+                    }
                 }
-                parts.push(piece)
+                var s = tail + piece
+                var total = Catalog.pdfPageTokens(s)
+                var old = Catalog.pdfPageTokens(tail)
+                pages += Math.max(0, total - old)
+                tail = s.substring(Math.max(0, s.length - 24))
                 at += piece.length
+                if (at > 0 && at % (Catalog.BLOCK * 8) === 0)
+                    console.log("parallel-shelf: dest count at=" + at
+                                + " pages=" + pages + " path=" + path)
                 if (at > Catalog.FILE_BYTES_MAX) {
                     finish()
                     return

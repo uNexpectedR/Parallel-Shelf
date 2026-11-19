@@ -100,6 +100,11 @@ test("a PDF in memory becomes reader pages without a dest file", () => {
   assert.equal(c.pdfPageCount("%PDF-1.4 no pages"), 0)
   assert.equal(c.pdfPageCount("%PDF-1.4 /Type/Pages /Type/Page /Type/Page"), 2)
   assert.equal(c.pdfPageCount("%PDF-1.4 /Type /Page /Type /Pages /Type /Page"), 2)
+  assert.equal(c.pdfPageTokens("%PDF-1.4 /Type /Page /Type /Pages /Type /Page"), 2)
+  const head = "%PDF-1.4 /Type /Pa"
+  const rest = "ge /Type /Page"
+  const tail = head.substring(Math.max(0, head.length - 24))
+  assert.equal(c.pdfPageTokens(head) + Math.max(0, c.pdfPageTokens(tail + rest) - c.pdfPageTokens(tail)), 2)
   assert.equal(c.pdfPages("%PDF-1.4 /Type/Page").length, 1)
   assert.equal(c.b64encode("Man"), "TWFu")
   assert.equal(c.pdfDataUrl("%PDF-x").indexOf("data:application/pdf;base64,"), 0)

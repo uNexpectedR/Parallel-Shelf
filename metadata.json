@@ -1,7 +1,7 @@
 {
   "name": "parallel_shelf",
   "display_name": "Parallel Shelf",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "ui_qml",
   "category": "books",
   "description": "A public library. Anyone can put a book or audiobook on the shelf. Logos Storage keeps the files, Logos Delivery shares the catalog.",

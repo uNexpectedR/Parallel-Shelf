@@ -111,9 +111,8 @@ function isPdf(bytes) {
     return String(bytes || "").indexOf("%PDF-") === 0
 }
 
-function pdfPageCount(bytes) {
+function pdfPageTokens(bytes) {
     var s = String(bytes || "")
-    if (!isPdf(s)) return 0
     var n = 0
     var i = 0
     while (i < s.length) {
@@ -142,8 +141,14 @@ function pdfPageCount(bytes) {
         }
         i = at + 5
     }
-    // 0 means unknown — callers must not treat it as a 1-page book.
     return n
+}
+
+function pdfPageCount(bytes) {
+    var s = String(bytes || "")
+    if (!isPdf(s)) return 0
+    // 0 means unknown — callers must not treat it as a 1-page book.
+    return pdfPageTokens(s)
 }
 
 function pdfPages(bytes) {

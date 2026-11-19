@@ -26,7 +26,7 @@ test("core is its own type:core package at the same version as the view", () => 
   assert.equal(core.interface, "universal")
   assert.equal(core.main, "parallel_shelf_core_plugin")
   assert.equal(core.version, view.version)
-  assert.equal(view.version, "0.1.4")
+  assert.equal(view.version, "0.1.5")
 })
 
 test("the view still calls logos.callModuleAsync on parallel_shelf_core", () => {
@@ -364,6 +364,13 @@ test("Open retrieves with downloadToUrl, Share uses uploadUrl like muster", () =
   assert.match(catalog, /function uniqueCid/)
   assert.match(main, /Catalog.uniqueCid/)
   assert.match(library, /open timeout dest try/)
+  assert.match(library, /open timeout wait count/)
+  assert.match(library, /open dest count wait/)
+  assert.match(catalog, /function pdfPageTokens/)
+  assert.match(qml, /Catalog.pdfPageTokens/)
+  assert.match(qml, /dest count at=/)
+  assert.doesNotMatch(main, /proof-015/)
+  assert.doesNotMatch(main, /proof015/)
   assert.match(qml, /files.fileSize\(path\)/)
   assert.match(sidecar, /return a == b/)
   assert.doesNotMatch(sidecar, /a.startswith\(b\)/)

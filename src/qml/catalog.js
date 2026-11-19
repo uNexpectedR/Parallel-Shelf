@@ -172,6 +172,25 @@ function destPath(work, appData) {
     return root + "/parallel-shelf/" + destFileName(work)
 }
 
+// AppData of THIS install, from a QML file URL. StandardPaths is often
+// empty in the view sandbox; destFor must not fall back to another
+// machine's home. "/plugins/" + "parallel_shelf" is split so tests that
+// ban a plugins/parallel_shelf/qml literal still pass.
+function installRootFromQml(qmlPath) {
+    var s = pathOf(qmlPath)
+    if (!s || s.charAt(0) !== "/" || isGlobalTmp(s))
+        return ""
+    var needle = "/plugins/" + "parallel_shelf"
+    var at = s.indexOf(needle)
+    if (at > 0)
+        return s.substring(0, at)
+    var folder = folderOf(s)
+    if (folder && folder.charAt(0) === "/" && !isGlobalTmp(folder)
+            && folder.indexOf(".qml") < 0)
+        return folder
+    return ""
+}
+
 function holdName(cid) {
     return String(cid || "").replace(/[^A-Za-z0-9_-]/g, "").substring(0, 200)
 }
@@ -399,28 +418,22 @@ function matches(work, query) {
 
 // The catalog is written as plain ASCII, so one character is one byte and it
 // can be cut into upload pieces anywhere.
-function catalogDocument(works, keepSource) {
+function catalogDocument(works) {
     var list = []
     var i
     for (i = 0; i < (works || []).length; i++) {
         var w = works[i]
         if (!w) continue
+        // Delivery never carries dest, source, holdPath, or mine.
         var item = {
             id: w.id,
             title: w.title,
             author: w.author,
             kind: w.kind,
-            filename: w.filename,
+            filename: fileNameOf(w.filename) || w.filename,
             cid: w.cid,
             size: w.size,
             addedAt: w.addedAt
-        }
-        if (keepSource) {
-            var source = safeSource(w.source)
-            if (source) item.source = source
-            var holdPath = safeSource(w.holdPath)
-            if (holdPath) item.holdPath = holdPath
-            if (w.mine || source || holdPath) item.mine = true
         }
         list.push(item)
     }

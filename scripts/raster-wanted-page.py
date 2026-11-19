@@ -45,6 +45,7 @@ PPM = os.path.join(BIN, "pdftoppm")
 WANT = re.compile(
     r"(?:dest skip core \S+|rel=|Image\.source=)(page-([A-Za-z0-9_]+)-(\d+)\.png)"
 )
+WANTED_FILE = re.compile(r"^wanted-([A-Za-z0-9_]+)-(\d+)\.txt$")
 COUNT_WANT = re.compile(r"count wanted ([A-Za-z0-9_]+) (\S+)")
 FETCH_DISK = re.compile(r"fetch disk cid=(\S+) path=(\S+)")
 OPEN_DEST = re.compile(r"(?:open dest|destFor) cid=(\S+) (?:path|dest)=(\S+)")
@@ -269,6 +270,22 @@ def warm_covers():
         log("warm cover", key, os.path.basename(path))
 
 
+def scan_wanted():
+    try:
+        names = os.listdir(QML)
+    except OSError:
+        return
+    for name in names:
+        m = WANTED_FILE.match(name)
+        if not m:
+            continue
+        key, n = m.group(1), int(m.group(2))
+        dest = os.path.join(QML, "page-%s-%d.png" % (key, n))
+        if have(dest):
+            continue
+        want(key, n)
+
+
 def scan(text):
     for m in COVER_WANT.finditer(text):
         want(m.group(1), 0)
@@ -319,29 +336,36 @@ def main():
     if not os.path.isfile(PPM):
         raise SystemExit("pdftoppm missing: " + PPM)
     log("raster start qml", QML, "ppm", PPM)
-    warm_covers()
+    try:
+        warm_covers()
+    except Exception as e:
+        log("warm fail", e)
     path = ""
     fh = None
     while True:
-        cur = latest_log()
-        if cur and cur != path:
+        try:
+            cur = latest_log()
+            if cur and cur != path:
+                if fh:
+                    fh.close()
+                path = cur
+                fh = open(path, "r", errors="replace")
+                # New log: read a tail so dest-skip already written is not missed.
+                try:
+                    size = os.path.getsize(path)
+                except OSError:
+                    size = 0
+                fh.seek(max(0, size - 1048576), os.SEEK_SET)
+                if size > 1048576:
+                    fh.readline()
+                log("follow", path, "off", fh.tell())
             if fh:
-                fh.close()
-            path = cur
-            fh = open(path, "r", errors="replace")
-            # New log: read a tail so dest-skip already written is not missed.
-            try:
-                size = os.path.getsize(path)
-            except OSError:
-                size = 0
-            fh.seek(max(0, size - 1048576), os.SEEK_SET)
-            if size > 1048576:
-                fh.readline()
-            log("follow", path, "off", fh.tell())
-        if fh:
-            chunk = fh.read()
-            if chunk:
-                scan(chunk)
+                chunk = fh.read()
+                if chunk:
+                    scan(chunk)
+            scan_wanted()
+        except Exception as e:
+            log("scan fail", e)
         time.sleep(0.05)
 
 

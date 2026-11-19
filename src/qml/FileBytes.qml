@@ -103,6 +103,8 @@ Item {
             root = files.tryLocation(keys[i])
             if (root) return root
         }
+        root = Catalog.installRootFromQml(Qt.resolvedUrl("PdfPages.qml"))
+        if (root) return root
         return ""
     }
 
@@ -472,6 +474,22 @@ Item {
         return "page-" + key + "-" + n + ".png"
     }
 
+    // Dest PDF this Open downloaded (AppData), not ~/Downloads. Core
+    // pdftoppm looks up the CID in rememberSource; without this, inner
+    // pages stay on Rendering… when the sidecar is down.
+    property string paintPdfPath: ""
+
+    function wantPage(cid, page, dest) {
+        var n = Math.max(0, Math.floor(Number(page) || 0))
+        var key = Catalog.holdName(cid)
+        var dir = Catalog.folderOf(dest)
+        if (!key || !dir || dir.charAt(0) !== "/" || Catalog.isGlobalTmp(dir))
+            return
+        var path = dir + "/wanted-" + key + "-" + n + ".txt"
+        if (typeof files.putFile === "function")
+            files.putFile(path, String(n + 1), function () {})
+    }
+
     function renderPage(cid, page, width, done, pagesItem) {
         var finished = false
         var watch = null
@@ -510,6 +528,36 @@ Item {
             fail("Could not find the view qml dir.")
             return
         }
+        function copyCore(r) {
+            var path = Catalog.pathOf(r && r.value)
+            if (!(r && r.ok && path && path.charAt(0) === "/" && path.indexOf(".png") > 0
+                    && path.indexOf("/Downloads/") < 0)) {
+                if (!finished && r && r.error)
+                    console.log("parallel-shelf: renderPage core fail " + String(r.error))
+                return
+            }
+            console.log("parallel-shelf: renderPage core=" + path + " dest=" + dest)
+            if (!dest || path === dest
+                    || path.substring(path.length - rel.length - 1) === "/" + rel)
+                return
+            files.copyFile(path, dest, function () {})
+        }
+        function fireCore() {
+            try {
+                files.caller("parallel_shelf_core", "renderPage", [cid, n, w, dest], copyCore, 12000)
+            } catch (e) {}
+        }
+        function bindPdf(then) {
+            var pdf = Catalog.safeSource(files.paintPdfPath)
+            if (!pdf || pdf.charAt(0) !== "/" || Catalog.isGlobalTmp(pdf)
+                    || pdf.indexOf("/Downloads/") >= 0) {
+                if (typeof then === "function") then()
+                return
+            }
+            files.rememberSource(cid, pdf, function () {
+                if (typeof then === "function") then()
+            })
+        }
         function askCore() {
             try {
                 watch = Qt.createQmlObject("import QtQuick 2.15; Timer { interval: 12000; repeat: false; running: true }", files)
@@ -545,12 +593,13 @@ Item {
             }, 12000)
         }
         if (dest) {
-            // Do not wait on hung QtRO. Fire-and-forget core pdftoppm into
-            // dest, then return the relative name so Image retries until the
-            // PNG exists (core or scripts/raster-wanted-page.py).
-            try {
-                files.caller("parallel_shelf_core", "renderPage", [cid, n, w, dest], function () {}, 12000)
-            } catch (e) {}
+            // Do not wait on hung QtRO. Bind the dest PDF, fire-and-forget
+            // core pdftoppm into dest (copy if core wrote elsewhere), write
+            // a wanted marker for the sidecar, then return the relative name
+            // so Image retries until the PNG exists.
+            files.wantPage(cid, n, dest)
+            fireCore()
+            bindPdf(fireCore)
             console.log("parallel-shelf: dest skip core " + dest + " rel=" + rel)
             finish(rel)
             return

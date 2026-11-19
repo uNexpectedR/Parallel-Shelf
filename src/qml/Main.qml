@@ -250,10 +250,12 @@ Item {
     function startCorePaint(work, page, gen, item) {
         if (gen !== root.paintGen) return
         if (!work || !root.isOpen(root.reading, work)) return
+        disk.paintPdfPath = ""
+        if (library && typeof library.destPath === "function")
+            disk.paintPdfPath = library.destPath(work) || ""
         disk.renderPage(work.cid, page, 640, function (url, err) {
             if (gen !== root.paintGen) return
             if (!root || !root.isOpen(root.reading, work)) return
-            paintWatch.stop()
             var v = url
             if (typeof v === "string" && v.charAt(0) === "{") {
                 try { var p = JSON.parse(v); v = (p && p.value) ? p.value : "" } catch (e) {}
@@ -271,6 +273,7 @@ Item {
                 })
                 return
             }
+            paintWatch.stop()
             var msg = String(err || "")
             if (msg.indexOf("Could not draw") === 0)
                 root.readingNote = msg

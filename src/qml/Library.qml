@@ -247,6 +247,10 @@ Item {
             return "Logos Storage could not find it."
         if (s.indexOf("downloadCancel") >= 0)
             return "Logos Storage could not find it."
+        if (s.indexOf("cannot open") >= 0 || s.indexOf("Failed to stream") >= 0
+                || s.indexOf("/Users/") >= 0 || s.indexOf("/Library/") >= 0
+                || s.indexOf("/home/") >= 0)
+            return "Logos Storage could not find it."
         return s
     }
 
@@ -889,6 +893,15 @@ Item {
             root = tryLocation(keys[i])
             if (root) return root
         }
+        // View sandbox often has empty StandardPaths. Derive THIS
+        // install's AppData from the live QML file, never a hardcoded home.
+        root = Catalog.installRootFromQml(Qt.resolvedUrl("Library.qml"))
+        if (root) return root
+        if (files && typeof files.holdRoot === "function") {
+            root = files.holdRoot() || ""
+            if (root && root.charAt(0) === "/" && !Catalog.isGlobalTmp(root))
+                return root
+        }
         return ""
     }
 
@@ -1078,6 +1091,37 @@ Item {
         return view
     }
 
+    // Proof only: treat a CID as a Parallel Shelf copy (not mine) without
+    // rewriting saved.shelf. Fetch then downloadToUrl the CID.
+    function unownCid(cid) {
+        cid = Catalog.cleanText(cid, 200)
+        if (!cid) return
+        freezePersist = true
+        forgetLocal(cid)
+        var nextOwned = {}
+        var k
+        for (k in shelfOwned) {
+            if (String(k) !== cid) nextOwned[k] = shelfOwned[k]
+        }
+        shelfOwned = nextOwned
+        var list = []
+        var i
+        for (i = 0; i < works.length; i++) {
+            var w = works[i]
+            if (!w) continue
+            var item = {}
+            for (k in w) item[k] = w[k]
+            if (String(item.cid) === cid) {
+                delete item.mine
+                delete item.source
+                delete item.holdPath
+            }
+            list.push(item)
+        }
+        works = list
+        log("unown cid=" + cid)
+    }
+
     // Books this install Shared (saved.shelf / locals) are mine again.
     // Catalog extras stay not-mine. In-memory un-own from proofs is undone
     // without wiping persist.
@@ -1191,17 +1235,14 @@ Item {
 
     function destFor(work, done) {
         if (typeof done !== "function") return
-        var dest = destPath(work)
-        if (!(dest && dest.charAt(0) === "/" && !Catalog.isGlobalTmp(dest))) {
-            var root = ""
-            if (files && typeof files.holdRoot === "function")
-                root = files.holdRoot() || ""
-            if (!root)
-                root = "/Users/unexpectedr/Library/Application Support/Logos/LogosBasecamp"
-            dest = Catalog.destPath(work, root)
-        }
+        // Dest is always on THIS machine (destRoot from StandardPaths or
+        // this install's QML path). Never a catalog source/holdPath,
+        // never another install's home.
+        var root = destRoot()
+        var dest = Catalog.destPath(work, root)
         log("destFor cid=" + (work && work.cid) + " dest=" + dest)
-        if (dest && dest.charAt(0) === "/" && !Catalog.isGlobalTmp(dest))
+        if (dest && dest.charAt(0) === "/" && !Catalog.isGlobalTmp(dest)
+                && root && dest.indexOf(root + "/") === 0)
             done(dest)
         else
             done("")
@@ -1256,7 +1297,7 @@ Item {
                         : "Logos Storage could not find it.")
             return
         }
-        var cached = viewBytes(work)
+        var cached = isMine(work) ? viewBytes(work) : ""
         if (cached) {
             lastFetchFrom = "lastShare"
             fetchProgress = 1
@@ -1323,6 +1364,8 @@ Item {
 
         var filled = filledWork(work)
         var disk = ""
+        // Others never stream a catalog dest/source. Open is always
+        // downloadToUrl of the CID into a dest on this machine.
         if (isMine(work)) {
             disk = cardHold(filled) || cardSource(filled) || ""
             if (!disk && files && typeof files.holdPath === "function")
@@ -1666,6 +1709,8 @@ Item {
         holdLoading = true
         openingWork = work
         openWatch.restart()
+        if (files && typeof files.rememberSource === "function")
+            files.rememberSource(work.cid, dest, function () {})
         if (files && typeof files.readPageCount === "function")
             files.readPageCount(work.cid, dest, openDisk)
         else {
@@ -1687,11 +1732,15 @@ Item {
         if (files && typeof files.probe === "function") {
             files.probe(dest, function (n) {
                 if (!openingWork || openingWork.cid !== work.cid) return
-                if (n > 1000) {
+                // Others always downloadToUrl the CID. A dest that already
+                // exists is only reused for books this install Shared.
+                if (n > 1000 && isMine(work)) {
                     log("open dest already cid=" + work.cid + " n=" + n)
                     openFromDest(work, dest)
                     return
                 }
+                if (!(n > 1000))
+                    log("open dest missing cid=" + work.cid + " n=" + n)
                 queueMusterFetch(work, dest)
             })
             return

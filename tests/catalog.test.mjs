@@ -69,6 +69,11 @@ test("a fetched file name is <id>.<ext> under AppData/parallel-shelf", () => {
   assert.equal(c.destPath({ id: "ok", filename: "scan.pdf" }, "/var/tmp"), "")
   assert.equal(c.destPath({ id: "ok", filename: "scan.pdf" }, "/private/var/tmp"), "")
   assert.equal(c.destPath({ id: "ok", filename: "scan.pdf" }, ""), "")
+  assert.equal(c.installRootFromQml("/Users/ana/Library/Application Support/Logos/LogosBasecamp/plugins/parallel_shelf/qml/Library.qml"),
+               "/Users/ana/Library/Application Support/Logos/LogosBasecamp")
+  assert.equal(c.installRootFromQml("/home/bob/.local/share/LogosBasecamp/plugins/parallel_shelf/qml/Main.qml"),
+               "/home/bob/.local/share/LogosBasecamp")
+  assert.equal(c.installRootFromQml("/tmp/plugins/parallel_shelf/qml/Library.qml"), "")
   assert.equal(c.isGlobalTmp("/tmp"), true)
   assert.equal(c.isGlobalTmp("/var/tmp"), true)
   assert.equal(c.isGlobalTmp("/private/tmp"), true)
@@ -177,10 +182,21 @@ test("the local shelf is catalog-only; the published catalog does not store path
   const listed = c.merge([work], null, true)
   assert.equal(listed[0].source, "/Users/me/Downloads/book.pdf")
   assert.equal(listed[0].mine, true)
-  const published = c.catalogDocument(listed)
+  const published = c.catalogDocument(listed, true)
   assert.equal(published.indexOf("/Users/me"), -1)
   assert.equal(published.indexOf("source"), -1)
   assert.equal(published.indexOf("mine"), -1)
+  const leaked = {
+    ...listed[0],
+    dest: "/Users/unexpectedr/Library/Application Support/Logos/LogosBasecamp/parallel-shelf/mwl5ahqs-3t8nmi.pdf",
+    holdPath: "/Users/unexpectedr/Library/Application Support/Logos/LogosBasecamp/hold",
+  }
+  const stripped = JSON.parse(c.catalogDocument([leaked], true))
+  assert.equal(stripped.works[0].dest, undefined)
+  assert.equal(stripped.works[0].source, undefined)
+  assert.equal(stripped.works[0].holdPath, undefined)
+  assert.equal(stripped.works[0].mine, undefined)
+  assert.equal(JSON.stringify(stripped).indexOf("/Users/unexpectedr"), -1)
   const shelf = c.shelfDocument(listed)
   assert.equal(shelf.indexOf("/Users/me/Downloads/book.pdf"), -1)
   assert.equal(shelf.indexOf("source"), -1)

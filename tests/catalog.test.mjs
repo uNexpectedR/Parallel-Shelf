@@ -142,6 +142,19 @@ test("re-uploads of the same CID collapse to the first card", () => {
   assert.equal(merged[0].cid, farewell.cid)
 })
 
+test("uniqueCid keeps one card per CID and two CIDs with the same title", () => {
+  const a = { id: "a", title: "The Network State", author: "Balaji",
+              filename: "a.pdf", cid: "zDvA", size: 2300000, addedAt: 1 }
+  const a2 = { id: "a2", title: "The Network State", author: "Balaji",
+               filename: "a2.pdf", cid: "zDvA", size: 2300000, addedAt: 2 }
+  const b = { id: "b", title: "The Network State", author: "Balaji",
+              filename: "b.pdf", cid: "zDvB", size: 6300000, addedAt: 3 }
+  const u = c.uniqueCid([a, a2, b])
+  assert.equal(u.length, 2)
+  assert.equal(u[0].id, "a")
+  assert.equal(u[1].cid, "zDvB")
+})
+
 test("two different CIDs stay two cards even with the same title", () => {
   const a = { id: "a", title: "Farewell to Westphalia", author: "Jarrad Hope and Peter Ludlow",
               filename: "a.pdf", cid: "zDvA", addedAt: 1 }

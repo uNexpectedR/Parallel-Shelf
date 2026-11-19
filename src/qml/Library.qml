@@ -449,7 +449,7 @@ Item {
     function persistShelf() {
         if (freezePersist) return
         saved.epoch = shelfEpoch
-        var mine = onlyMine(works)
+        var mine = Catalog.uniqueCid(onlyMine(works))
         if (!mine.length) {
             saved.shelf = ""
             return
@@ -1403,19 +1403,11 @@ Item {
         if (!work) return
         log("open timeout cid=" + work.cid)
         var dest = destPath(work)
-        if (dest && dest.charAt(0) === "/" && files && typeof files.probe === "function") {
-            files.probe(dest, function (n) {
-                if (!openingWork || openingWork.cid !== work.cid) return
-                if (n > 1000) {
-                    log("open timeout dest cid=" + work.cid + " n=" + n)
-                    openFromDest(work, dest)
-                    return
-                }
-                if (holdLoading) return
-                if (job && job.work && job.work.cid === work.cid) return
-                fetchFailed(work, isMine(work) ? Catalog.CHOOSE_AGAIN
-                            : "Logos Storage did not answer in time.")
-            })
+        // Core fileSize often returns -1 for a dest that is already on
+        // this machine. Count that dest instead of waiting on count-*.png.
+        if (dest && dest.charAt(0) === "/" && !Catalog.isGlobalTmp(dest)) {
+            log("open timeout dest try cid=" + work.cid)
+            openFromDest(work, dest)
             return
         }
         if (holdLoading) return
@@ -1709,6 +1701,8 @@ Item {
         holdLoading = true
         openingWork = work
         openWatch.restart()
+        if (files && typeof files.remember === "function" && work.size > 1000)
+            files.remember(dest, work.size)
         if (files && typeof files.rememberSource === "function")
             files.rememberSource(work.cid, dest, function () {})
         if (files && typeof files.readPageCount === "function")
@@ -1732,9 +1726,9 @@ Item {
         if (files && typeof files.probe === "function") {
             files.probe(dest, function (n) {
                 if (!openingWork || openingWork.cid !== work.cid) return
-                // Others always downloadToUrl the CID. A dest that already
-                // exists is only reused for books this install Shared.
-                if (n > 1000 && isMine(work)) {
+                // Others always downloadToUrl the CID. Mine opens a dest
+                // on this machine even when core fileSize is -1.
+                if (isMine(work)) {
                     log("open dest already cid=" + work.cid + " n=" + n)
                     openFromDest(work, dest)
                     return
@@ -1743,6 +1737,10 @@ Item {
                     log("open dest missing cid=" + work.cid + " n=" + n)
                 queueMusterFetch(work, dest)
             })
+            return
+        }
+        if (isMine(work)) {
+            openFromDest(work, dest)
             return
         }
         queueMusterFetch(work, dest)

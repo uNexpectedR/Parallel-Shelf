@@ -147,7 +147,7 @@ def cid_matches(cid, key):
     b = re.sub(r"[^A-Za-z0-9_]", "", key or "")
     if not a or not b:
         return False
-    return a == b or a.startswith(b) or b.startswith(a)
+    return a == b
 
 
 def pdf_for_key(key):

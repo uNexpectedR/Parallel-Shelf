@@ -28,7 +28,7 @@ void ParallelShelfCoreImpl::onContextReady()
 std::string ParallelShelfCoreImpl::snapshot()
 {
     QJsonObject v;
-    v.insert(QStringLiteral("version"), QStringLiteral("0.1.3"));
+    v.insert(QStringLiteral("version"), QStringLiteral("0.1.4"));
     return reply(true, v, QString());
 }
 

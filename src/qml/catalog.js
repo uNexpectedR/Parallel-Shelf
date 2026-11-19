@@ -307,6 +307,22 @@ function merge(works, extra, keepSource) {
     return byAddTime(next)
 }
 
+// One card per CID. Same title with two CIDs stays two cards.
+function uniqueCid(list) {
+    var seen = {}
+    var next = []
+    var i
+    for (i = 0; i < (list || []).length; i++) {
+        var w = list[i]
+        if (!w) continue
+        var cid = cleanText(w.cid, 200)
+        if (!cid || seen[cid]) continue
+        seen[cid] = true
+        next.push(w)
+    }
+    return next
+}
+
 // Oldest original add time first (catalog addedAt / Delivery announce).
 // Missing times stay after dated cards and keep their relative order —
 // not the order this install first fetched them.

@@ -144,7 +144,7 @@ Item {
     // the same QFile helper the core module ships (tests/TestFileBytes). The
     // view never imports that plugin; it only calls callModuleAsync.
     function shelfCore(method, args) {
-        if (method === "snapshot") return ok('{"version":"0.1.3"}')
+        if (method === "snapshot") return ok('{"version":"0.1.4"}')
         if (method === "fetchDest") {
             if (wrong(method, args, ["string", "string"])) return failed("bad arguments")
             var dest = TestFileBytes.fetchDest(args[0], args[1])

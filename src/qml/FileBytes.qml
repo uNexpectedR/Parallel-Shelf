@@ -151,13 +151,18 @@ Item {
             done(-1)
             return
         }
+        var known = files.fileSize(path)
+        if (known > 0) {
+            done(known)
+            return
+        }
         if (typeof files.caller !== "function") {
-            done(files.fileSize(path) > 0 ? files.fileSize(path) : -1)
+            done(-1)
             return
         }
         files.caller("parallel_shelf_core", "fileSize", [path], function (r) {
             if (Catalog.alreadyInitialized(r && r.error)) {
-                done(-1)
+                done(files.fileSize(path) > 0 ? files.fileSize(path) : -1)
                 return
             }
             var got = Number(r && r.ok ? r.value : -1)
@@ -392,31 +397,42 @@ Item {
             done(0)
             return
         }
-        files.probe(path, function (size) {
-            if (!(size > 1000)) {
-                done(0)
+        var known = files.fileSize(path)
+        var at = 0
+        var parts = []
+        var take = Catalog.BLOCK
+        function finish() {
+            done(Catalog.pdfPageCount(parts.join("")))
+        }
+        function step() {
+            var n = known > 1000 ? Math.min(take, known - at) : take
+            if (known > 1000 && at >= known) {
+                finish()
                 return
             }
-            var at = 0
-            var parts = []
-            var take = Catalog.BLOCK
-            function step() {
-                if (at >= size) {
-                    done(Catalog.pdfPageCount(parts.join("")))
+            if (!(n > 0)) {
+                finish()
+                return
+            }
+            files.readPiece(path, at, n, function (piece) {
+                if (!piece || !piece.length) {
+                    finish()
                     return
                 }
-                files.readPiece(path, at, Math.min(take, size - at), function (piece) {
-                    if (!piece || !piece.length) {
-                        done(Catalog.pdfPageCount(parts.join("")))
-                        return
-                    }
-                    parts.push(piece)
-                    at += piece.length
-                    step()
-                })
-            }
-            step()
-        })
+                if (at === 0 && String(piece).indexOf("%PDF-") !== 0) {
+                    done(0)
+                    return
+                }
+                parts.push(piece)
+                at += piece.length
+                if (at > Catalog.FILE_BYTES_MAX) {
+                    finish()
+                    return
+                }
+                step()
+            })
+        }
+        step()
     }
 
     function readPageCount(cid, disk, done) {

@@ -163,8 +163,8 @@ Item {
             else
                 others.push(w)
         }
-        shownMine = Catalog.byAddTime(mine)
-        shownOthers = Catalog.byAddTime(others)
+        shownMine = Catalog.byAddTime(Catalog.uniqueCid(mine))
+        shownOthers = Catalog.byAddTime(Catalog.uniqueCid(others))
         shown = mine.concat(others)
         root.paintAllCovers()
     }

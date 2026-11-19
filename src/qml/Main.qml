@@ -163,8 +163,8 @@ Item {
             else
                 others.push(w)
         }
-        shownMine = mine
-        shownOthers = others
+        shownMine = Catalog.byAddTime(mine)
+        shownOthers = Catalog.byAddTime(others)
         shown = mine.concat(others)
         root.paintAllCovers()
     }
@@ -196,7 +196,7 @@ Item {
             return "Logos Delivery is not running."
         if (library.storageState === "down")
             return "Logos Storage is not running, so a file cannot be Shared."
-        return "Choose a file to add a book. Only books you Share on this install appear here."
+        return "Choose a file to add a book. Books you Share stand on Your Shelf. Books other people Share stand on Parallel Shelf."
     }
 
     property int paintGen: 0
@@ -408,9 +408,11 @@ Item {
             // QFile-writes page-<cid>-N.png to PdfPages.pathFor (this Loader
             // document). Image.source is that relative name. Never file://,
             // never data:, never a QML XHR PUT. Never a guessed qml dir.
-            var staged = library && library.lastShareFile
-                         ? library.lastShareFile[work.cid] : ""
-            disk.persistHold(work.cid, pdf, function () {}, staged)
+            if (library.isMine(work)) {
+                var staged = library && library.lastShareFile
+                             ? library.lastShareFile[work.cid] : ""
+                disk.persistHold(work.cid, pdf, function () {}, staged)
+            }
             root.paintCorePage(work, root.readerPanel ? root.readerPanel.page : 0)
         }
 
@@ -438,7 +440,7 @@ Item {
 
         onFetchFailed: function (work, why) {
             var note = String(why || "")
-            if (library.onLocalShelf(work) || note.indexOf("Choose file") >= 0) {
+            if (library.isMine(work) && note.indexOf("Choose file") >= 0) {
                 if (root.isOpen(root.listening, work)) root.listeningNote = Catalog.CHOOSE_AGAIN
                 else if (root.isOpen(root.reading, work)) root.readingNote = Catalog.CHOOSE_AGAIN
                 return
@@ -867,6 +869,5 @@ Item {
                 root.paintCorePage(root.reading, reader.page)
         }
     }
-
 
 }

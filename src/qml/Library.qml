@@ -33,13 +33,12 @@ import "catalog.js" as Catalog
 // Downloads path (Mac TCC), never file:// Image, never data: Image,
 // never PdfPageView, never Qt Pdf in the core dylib, and never the
 // title-card cover when the PDF has pages.
-// The shelf is only books this install Shared (Choose file). Logos
-// Delivery can stay running; its catalog is not imported into the
-// card list. Settings category is versioned (parallel_shelf_v1) so
-// older Delivery-imported cards cannot refill
-// the shelf. If they never Shared it, Choose file again
-// in under 2s. Open must not stay on Opening: a miss asks to Choose
-// file again, a hang times out.
+// Your Shelf is books this install Shared. Parallel Shelf is books
+// other people Shared, from Logos Delivery catalogs. Settings stay
+// parallel_shelf_v1 / 1.0.0 so this install’s shelf is not wiped.
+// persistShelf stores only mine. Incoming catalogs merge without
+// mine. Open of others fetches from Storage. Page count is a relative
+// count-<cid>.png (width = pages), never file:// listing.
 // The card CID is storageUploadDone's; manifests() never replaces it.
 // Two CIDs stay two cards. Dest write is optional. A fetch that
 // finishes with 0 bytes is a failure, not an empty reader. Empty dest
@@ -77,6 +76,7 @@ Item {
     onFetchFailed: {
         openWatch.stop()
         openingWork = null
+        holdLoading = false
     }
 
     property var host: null                 // the logos object, from Main or Basecamp
@@ -129,6 +129,7 @@ Item {
     property var openingWork: null
     property var pendingUpload: null
     property bool holdLoading: false
+    property bool freezePersist: false
 
     property bool catalogBusy: false
     property bool catalogStale: false
@@ -380,7 +381,7 @@ Item {
             var payload = Catalog.eventPayload(data)
             if (payload) onStorage(event, payload)
         } else if (module === "delivery_module" && event === "messageReceived") {
-            onMessage(part(data, 0), part(data, 1), part(data, 2))
+            onMessage(part(data, 0), part(data, 1), part(data, 2), part(data, 4))
         }
     }
 
@@ -434,6 +435,7 @@ Item {
         if (storageState === "running") return
         storageState = "running"
         restoreShelf()
+        wantCatalog(saved.catalog)
         next()
     }
 
@@ -441,6 +443,7 @@ Item {
     readonly property alias savedShelf: saved.shelf
 
     function persistShelf() {
+        if (freezePersist) return
         saved.epoch = shelfEpoch
         var mine = onlyMine(works)
         if (!mine.length) {
@@ -556,9 +559,10 @@ Item {
     function isMine(work) {
         if (!work) return false
         if (work.mine) return true
-        if (work.cid && shelfOwned[work.cid]) return true
-        if (work.cid && lastShareOf(work.cid)) return true
-        if (byCid[work.cid]) return true
+        var cid = Catalog.cleanText(work.cid, 200)
+        if (!cid) return false
+        if (shelfOwned[cid]) return true
+        if (localPath(cid)) return true
         return false
     }
 
@@ -596,7 +600,7 @@ Item {
         for (i = 0; i < (list || []).length; i++) {
             var w = list[i]
             if (!w || !w.cid) continue
-            if (!(w.mine || shelfOwned[w.cid] || lastShareOf(w.cid) || localPath(w.cid)))
+            if (!(w.mine || shelfOwned[w.cid] || localPath(w.cid)))
                 continue
             w.mine = true
             ownCid(w.cid)
@@ -610,7 +614,16 @@ Item {
 
     function restoreShelf() {
         forgetOldShelf()
-        if (works.length) return
+        if (works.length) {
+            var owned = 0
+            var i
+            for (i = 0; i < works.length; i++) {
+                if (isMine(works[i])) owned++
+            }
+            if (!owned && saved.shelf)
+                restoreMine()
+            return
+        }
         var listed = onlyMine(Catalog.readCatalog(saved.shelf, true) || [])
         if (listed.length) {
             works = stampLocals(listed)
@@ -618,8 +631,21 @@ Item {
         }
     }
 
+    function destPdfReady(n) {
+        n = Number(n) || 0
+        if (n < 1000) return false
+        if (!job || job.kind !== "file" || !job.path) return false
+        if (!(job.work && Catalog.extensionOf(job.work.filename) === "pdf"))
+            return false
+        var want = jobWant || (job.work.size > 0 ? job.work.size : 0)
+        if (want > 0) return n >= want
+        return n > 1000
+    }
+
     function fetchedEnough() {
+        if (destPdfReady(jobSeen)) return true
         if (!job || !jobBytes.length) return false
+        if (job.kind === "catalog") return false
         if (job.kind === "file" && job.work && Catalog.extensionOf(job.work.filename) === "pdf"
                 && !Catalog.isPdf(jobBytes))
             return false
@@ -629,6 +655,13 @@ Item {
 
     function onDownloadDone(p) {
         if (!job || (p.sessionId && p.sessionId !== job.cid)) return
+        if (job.kind === "catalog") {
+            if (p.success === false && !Catalog.alreadyInitialized(p.error))
+                finishJob(false, p.error || "The catalog could not be read.")
+            else
+                finishJob(!!jobBytes.length, jobBytes.length ? "" : "The catalog was empty.")
+            return
+        }
         if (p.success === false && !Catalog.alreadyInitialized(p.error)) {
             if (fetchedEnough()) finishJob(true, "")
             else openHoldThenFinish(job, p.error || "Logos Storage could not find it.")
@@ -726,7 +759,7 @@ Item {
         }
     }
 
-    function onMessage(hash, topic, body) {
+    function onMessage(hash, topic, body, timestamp) {
         if (topic && topic !== Catalog.TOPIC) return
         if (hash) {
             if (seenMessages[hash]) return
@@ -734,7 +767,7 @@ Item {
         }
         var pointer = Catalog.readPointer(body)
         if (pointer)
-            log("ignore catalog " + pointer)
+            wantCatalog(pointer, timestamp)
     }
 
     function readHistory() {
@@ -759,7 +792,7 @@ Item {
                 var message = messages[i] && messages[i].message ? messages[i].message : messages[i]
                 var pointer = Catalog.readPointer(message ? message.payload : "")
                 if (pointer)
-                    log("ignore catalog " + pointer)
+                    wantCatalog(pointer, message ? message.timestamp : 0)
             }
         }, 20000)
     }
@@ -775,10 +808,58 @@ Item {
 
     // ---- Fetching from Storage --------------------------------------------
 
-    function wantCatalog(cid) {
-        // 1.0.0: Delivery catalogs do not spawn cards. The shelf is only
-        // books this install Shared (Choose file).
-        if (cid) log("ignore catalog " + cid)
+    function wantCatalog(cid, deliveredAt) {
+        cid = Catalog.cleanText(cid, 200)
+        if (!cid || fetchedCatalogs[cid] || queue.length >= Catalog.QUEUE_MAX) return
+        fetchedCatalogs[cid] = true
+        log("want catalog " + cid)
+        queue = queue.concat([{
+            cid: cid,
+            kind: "catalog",
+            work: null,
+            path: "",
+            limit: Catalog.CATALOG_BYTES_MAX,
+            deliveredAt: Catalog.stampAddedAt(deliveredAt)
+        }])
+        next()
+    }
+
+    function applyCatalogList(listed, cid, deliveredAt) {
+        if (!listed) return
+        if (listed.length >= largestCatalog) {
+            largestCatalog = listed.length
+            if (cid) saved.catalog = cid
+        }
+        var at = Catalog.stampAddedAt(deliveredAt)
+        var i
+        if (at) {
+            for (i = 0; i < listed.length; i++) {
+                if (listed[i] && !Catalog.stampAddedAt(listed[i].addedAt))
+                    listed[i].addedAt = at
+            }
+        }
+        var before = works.length
+        works = Catalog.merge(works, listed)
+        var names = []
+        for (i = 0; i < listed.length; i++) {
+            if (listed[i] && listed[i].title)
+                names.push(listed[i].title)
+        }
+        log("catalog " + (cid || "") + " listed=" + listed.length
+            + " shelf=" + works.length + " added=" + (works.length - before)
+            + (names.length ? (" titles=" + names.join(", ")) : ""))
+    }
+
+    function ingestCatalog(text, cid, announce) {
+        var listed = Catalog.readCatalog(text)
+        if (!listed) {
+            log("catalog ingest failed")
+            return 0
+        }
+        applyCatalogList(listed, cid || "", 0)
+        if (announce === false)
+            largestCatalog = Math.max(largestCatalog, works.length)
+        return listed.length
     }
 
     function tryLocation(loc) {
@@ -848,7 +929,7 @@ Item {
         return path
     }
 
-    function keepLastShare(cid, bytes, path) {
+    function keepLastShare(cid, bytes, path, own) {
         cid = Catalog.cleanText(cid, 200)
         if (!cid || !bytes || !bytes.length) return
         var copy = ["", bytes].join("")
@@ -870,7 +951,8 @@ Item {
             filesNext[cid] = path
             lastShareFile = filesNext
         }
-        ownCid(cid)
+        if (own !== false)
+            ownCid(cid)
     }
 
     // PdfDocument URL from this view (not logoscore). file:// of the
@@ -986,12 +1068,72 @@ Item {
         for (k in work) {
             if (view[k] === undefined) view[k] = work[k]
         }
-        var source = cardSource(view)
-        var hold = cardHold(view)
-        if (source) view.source = source
-        if (hold) view.holdPath = hold
-        if (view.mine || source || hold) view.mine = true
+        if (isMine(view)) {
+            var source = cardSource(view)
+            var hold = cardHold(view)
+            if (source) view.source = source
+            if (hold) view.holdPath = hold
+            view.mine = true
+        }
         return view
+    }
+
+    // Books this install Shared (saved.shelf / locals) are mine again.
+    // Catalog extras stay not-mine. In-memory un-own from proofs is undone
+    // without wiping persist.
+    function restoreMine() {
+        freezePersist = false
+        var listed = onlyMine(Catalog.readCatalog(saved.shelf, true) || [])
+        var i, k
+        for (i = 0; i < listed.length; i++) {
+            if (listed[i] && listed[i].cid)
+                ownCid(listed[i].cid)
+        }
+        var owned = {}
+        for (i = 0; i < listed.length; i++) {
+            if (listed[i] && listed[i].cid)
+                owned[listed[i].cid] = listed[i]
+        }
+        var list = []
+        var seen = {}
+        for (i = 0; i < works.length; i++) {
+            var w = works[i]
+            if (!w || !w.cid) continue
+            var cid = String(w.cid)
+            var item = {}
+            for (k in w) item[k] = w[k]
+            var savedWork = owned[cid]
+            if (savedWork || shelfOwned[cid] || localPath(cid)) {
+                item.mine = true
+                if (savedWork) {
+                    if (savedWork.source) item.source = savedWork.source
+                    if (savedWork.holdPath) item.holdPath = savedWork.holdPath
+                    if (savedWork.addedAt && (!item.addedAt || savedWork.addedAt < item.addedAt))
+                        item.addedAt = savedWork.addedAt
+                }
+                var src = localPath(cid)
+                if (src && !Catalog.safeSource(item.source))
+                    item.source = src
+                ownCid(cid)
+            } else {
+                delete item.mine
+                delete item.source
+                delete item.holdPath
+            }
+            list.push(item)
+            seen[cid] = true
+        }
+        for (i = 0; i < listed.length; i++) {
+            var mine = listed[i]
+            if (!mine || !mine.cid || seen[mine.cid]) continue
+            mine.mine = true
+            ownCid(mine.cid)
+            list.push(mine)
+        }
+        works = Catalog.byAddTime(stampLocals(list))
+        persistShelf()
+        log("restore mine n=" + onlyMine(works).length + " shelf=" + works.length)
+        return onlyMine(works).length
     }
 
     function stampByCid(list) {
@@ -1033,6 +1175,9 @@ Item {
             return
         }
         bytesReady(work, bytes)
+        // Count stubs and Storage dest PDFs must not be overwritten.
+        if (lastFetchFrom === "downloadToUrl" || lastFetchFrom === "hold")
+            return
         var dest = destPath(work)
         if (dest && dest.charAt(0) === "/" && !Catalog.isGlobalTmp(dest)
                 && files && typeof files.writeAll === "function") {
@@ -1047,22 +1192,36 @@ Item {
     function destFor(work, done) {
         if (typeof done !== "function") return
         var dest = destPath(work)
-        if (dest && dest.charAt(0) === "/" && !Catalog.isGlobalTmp(dest)) {
-            done(dest)
-            return
+        if (!(dest && dest.charAt(0) === "/" && !Catalog.isGlobalTmp(dest))) {
+            var root = ""
+            if (files && typeof files.holdRoot === "function")
+                root = files.holdRoot() || ""
+            if (!root)
+                root = "/Users/unexpectedr/Library/Application Support/Logos/LogosBasecamp"
+            dest = Catalog.destPath(work, root)
         }
-        var id = Catalog.safeId(work && work.id) || "book"
-        var ext = Catalog.extensionOf(work && work.filename) || "pdf"
-        call("parallel_shelf_core", "fetchDest", [id, ext], function (r) {
-            var path = Catalog.pathOf(r && r.value)
-            if (path && path.charAt(0) === "/" && !Catalog.isGlobalTmp(path))
-                done(path)
-            else
-                done("")
-        })
+        log("destFor cid=" + (work && work.cid) + " dest=" + dest)
+        if (dest && dest.charAt(0) === "/" && !Catalog.isGlobalTmp(dest))
+            done(dest)
+        else
+            done("")
     }
 
     function dropJob() {
+        if (job && job.kind === "catalog" && job.cid) {
+            var cid = job.cid
+            var i, queued = false
+            for (i = 0; i < queue.length; i++) {
+                if (queue[i] && queue[i].kind === "catalog" && queue[i].cid === cid)
+                    queued = true
+            }
+            if (!queued) {
+                fetchedCatalogs[cid] = true
+                queue = [{ cid: cid, kind: "catalog", work: null, path: "",
+                           limit: Catalog.CATALOG_BYTES_MAX,
+                           deliveredAt: job.deliveredAt || 0 }].concat(queue)
+            }
+        }
         jobWatch.stop()
         jobPoll.stop()
         jobGrace.stop()
@@ -1076,25 +1235,27 @@ Item {
         destFor(work, function (dest) {
             if (!openingWork || openingWork.cid !== work.cid) return
             if (dest && dest.charAt(0) === "/" && !Catalog.isGlobalTmp(dest)) {
+                log("open dest cid=" + work.cid + " path=" + dest)
                 fetchFromStorage(work, dest)
                 return
             }
-            fetchFailed(work, Catalog.CHOOSE_AGAIN)
+            fetchFailed(work, isMine(work) ? Catalog.CHOOSE_AGAIN
+                        : "Logos Storage could not find it.")
         })
     }
 
     function fetch(work) {
         lastLocalMiss = ""
         lastFetchFrom = ""
-        holdLoading = false
+        holdLoading = true
         openingWork = work
         openWatch.restart()
         fetchProgress = 0
         if (!work || !work.cid) {
-            fetchFailed(work, Catalog.CHOOSE_AGAIN)
+            fetchFailed(work, isMine(work) ? Catalog.CHOOSE_AGAIN
+                        : "Logos Storage could not find it.")
             return
         }
-        var want = work.size > 0 ? work.size : 0
         var cached = viewBytes(work)
         if (cached) {
             lastFetchFrom = "lastShare"
@@ -1102,122 +1263,82 @@ Item {
             log("fetch lastShare cid=" + work.cid + " bytes=" + cached.length)
             dropJob()
             openFromHold(work, cached)
+            next()
             return
         }
-        // Mac 0.49: QtRO loadHold/readAll hang, then Open says Choose file
-        // again even though Share left a real PDF on disk. Prefer that
-        // hold/source path (NUL-safe copy, not lastShare writeAll). Stub
-        // %PDF- is only for showingPdf; rasterize uses the file.
-        var disk = cardHold(filledWork(work)) || cardSource(filledWork(work)) || ""
-        if (!disk && files && typeof files.holdPath === "function")
-            disk = files.holdPath(work.cid)
-        if (disk && disk.charAt(0) === "/") {
+
+        function beginDisk(path) {
             function openDisk(n) {
                 n = Number(n) || 0
                 // Miss (0) must not become 1 page: that hides Prev/Next
                 // and "Page X of Y". Wait for the sidecar count marker.
                 if (n < 1)
                     return
+                holdLoading = false
                 var stub = "%PDF-1.4\n"
                 var i
                 for (i = 0; i < n; i++) stub += "/Type/Page\n"
                 lastFetchFrom = "hold"
                 fetchProgress = 1
-                log("fetch disk cid=" + work.cid + " path=" + disk + " pages=" + n)
-                keepLastShare(work.cid, stub, disk)
+                log("fetch disk cid=" + work.cid + " path=" + path + " pages=" + n)
+                keepLastShare(work.cid, stub, path, isMine(work))
                 dropJob()
                 openFromHold(work, stub)
+                next()
             }
-            if (files && typeof files.readPageCount === "function")
-                files.readPageCount(work.cid, disk, openDisk)
-            else
-                openDisk(1)
-            return
-        }
-        log("open start cid=" + work.cid + " downloadToUrl")
-        function retrieve() {
-            holdLoading = false
-            if (!openingWork || openingWork.cid !== work.cid) return
-            if (isMine(work) || shelfOwned[work.cid])
-                retrieveFromStorage(work)
-            else
-                fetchFailed(work, Catalog.CHOOSE_AGAIN)
-        }
-        function tryOriginal() {
-            var path = cardSource(filledWork(work))
-            if (!path || !files || typeof files.readAll !== "function") {
-                retrieve()
-                return
-            }
-            files.readAll(path, want, function (p) {
-                if (openingWork && openingWork.cid === work.cid && p > fetchProgress && p < 1)
-                    fetchProgress = p
-            }, function (bytes) {
-                if (!openingWork || openingWork.cid !== work.cid) return
-                if (Catalog.shareHit(bytes, want, work.filename)) {
-                    holdLoading = false
-                    lastFetchFrom = "source"
-                    log("fetch source cid=" + work.cid + " bytes=" + bytes.length)
-                    lastLocalMiss = ""
-                    dropJob()
-                    keepLastShare(work.cid, bytes)
-                    holdShared(work.cid, bytes, true)
-                    openFromHold(work, bytes)
-                    return
-                }
-                retrieve()
-            })
-        }
-        function trySource() {
-            if (files && typeof files.loadSource === "function") {
-                files.loadSource(work.cid, want, function (bytes) {
-                    if (!openingWork || openingWork.cid !== work.cid) return
-                    if (Catalog.shareHit(bytes, want, work.filename)) {
-                        holdLoading = false
-                        lastFetchFrom = "source"
-                        log("fetch source cid=" + work.cid + " bytes=" + bytes.length)
-                        lastLocalMiss = ""
-                        dropJob()
-                        keepLastShare(work.cid, bytes)
-                        holdShared(work.cid, bytes, true)
-                        openFromHold(work, bytes)
-                        return
-                    }
-                    tryOriginal()
-                }, function (p) {
-                    if (openingWork && openingWork.cid === work.cid && p > fetchProgress && p < 1)
-                        fetchProgress = p
-                })
-                return
-            }
-            tryOriginal()
-        }
-        if (files && typeof files.loadHold === "function") {
             holdLoading = true
-            files.loadHold(work.cid, want, function (bytes) {
-                if (Catalog.shareHit(bytes, want, work.filename)) {
-                    holdLoading = false
-                    lastFetchFrom = "hold"
-                    log("fetch hold cid=" + work.cid + " bytes=" + bytes.length)
-                    lastLocalMiss = ""
-                    dropJob()
-                    openFromHold(work, bytes)
-                    return
-                }
-                trySource()
-            }, function (p) {
-                if (openingWork && openingWork.cid === work.cid && p > fetchProgress && p < 1)
-                    fetchProgress = p
-            })
-            return
+            if (files && typeof files.readPageCount === "function")
+                files.readPageCount(work.cid, path, openDisk)
+            else {
+                holdLoading = false
+                openDisk(1)
+            }
         }
-        trySource()
+
+        function beginStorage() {
+            if (!openingWork || openingWork.cid !== work.cid) return
+            log("open start cid=" + work.cid + " downloadToUrl")
+            retrieveFromStorage(work)
+        }
+
+        function considerPath(path) {
+            if (!path || path.charAt(0) !== "/") {
+                beginStorage()
+                return
+            }
+            if (!files || typeof files.probe !== "function") {
+                beginDisk(path)
+                return
+            }
+            files.probe(path, function (n) {
+                if (!openingWork || openingWork.cid !== work.cid) return
+                if (n > 1000)
+                    beginDisk(path)
+                else {
+                    log("open miss local cid=" + work.cid + " path=" + path + " n=" + n)
+                    beginStorage()
+                }
+            })
+        }
+
+        var filled = filledWork(work)
+        var disk = ""
+        if (isMine(work)) {
+            disk = cardHold(filled) || cardSource(filled) || ""
+            if (!disk && files && typeof files.holdPath === "function")
+                disk = files.holdPath(work.cid)
+        }
+        if (disk)
+            considerPath(disk)
+        else
+            beginStorage()
     }
 
     function openHoldOrFail(work) {
         var want = work && work.size > 0 ? work.size : 0
-        if (!files || typeof files.loadHold !== "function") {
-            fetchFailed(work, Catalog.CHOOSE_AGAIN)
+        if (!isMine(work) || !files || typeof files.loadHold !== "function") {
+            fetchFailed(work, isMine(work) ? Catalog.CHOOSE_AGAIN
+                        : "Logos Storage could not find it.")
             return
         }
         files.loadHold(work.cid, want, function (bytes) {
@@ -1240,7 +1361,8 @@ Item {
         log("open timeout cid=" + work.cid)
         if (holdLoading) return
         if (job && job.work && job.work.cid === work.cid) return
-        fetchFailed(work, Catalog.CHOOSE_AGAIN)
+        fetchFailed(work, isMine(work) ? Catalog.CHOOSE_AGAIN
+                    : "Logos Storage did not answer in time.")
     }
 
     function readLocal(work, want, done, onProgress) {
@@ -1504,18 +1626,49 @@ Item {
         fromSource()
     }
 
+    function openFromDest(work, dest) {
+        dest = Catalog.safeSource(dest)
+        if (!work || !dest || dest.charAt(0) !== "/") {
+            fetchFailed(work, Catalog.CHOOSE_AGAIN)
+            return
+        }
+        function openDisk(n) {
+            n = Number(n) || 0
+            if (n < 1)
+                return
+            holdLoading = false
+            var stub = "%PDF-1.4\n"
+            var i
+            for (i = 0; i < n; i++) stub += "/Type/Page\n"
+            lastFetchFrom = "downloadToUrl"
+            fetchProgress = 1
+            log("fetch disk cid=" + work.cid + " path=" + dest + " pages=" + n)
+            keepLastShare(work.cid, stub, dest, isMine(work))
+            dropJob()
+            openFromHold(work, stub)
+        }
+        holdLoading = true
+        openingWork = work
+        openWatch.restart()
+        if (files && typeof files.readPageCount === "function")
+            files.readPageCount(work.cid, dest, openDisk)
+        else {
+            holdLoading = false
+            openDisk(1)
+        }
+    }
+
     function fetchFromStorage(work, dest) {
         if (!dest || dest.charAt(0) !== "/" || Catalog.isGlobalTmp(dest)) {
             openHoldOrFail(work)
             return
         }
-        if (!files || typeof files.ensureDir !== "function") {
-            queueMusterFetch(work, dest)
-            return
+        // Do not wait on hung QtRO mkdir. downloadToUrl writes the dest
+        // file; the sidecar rasters from that path.
+        if (files && typeof files.ensureDir === "function") {
+            try { files.ensureDir(dest, function () {}) } catch (e) {}
         }
-        files.ensureDir(dest, function () {
-            queueMusterFetch(work, dest)
-        })
+        queueMusterFetch(work, dest)
     }
 
     function queueMusterFetch(work, dest) {
@@ -1562,9 +1715,13 @@ Item {
         files.stat(started.path, function (n) {
             if (job !== started) return
             var want = jobWant || (started.work && started.work.size > 0 ? started.work.size : 0)
-            if (n > 0 && (want <= 0 || n >= want))
+            if (n > 0 && (want <= 0 || n >= want)) {
+                if (destPdfReady(n)) {
+                    finishJob(true, "")
+                    return
+                }
                 readDestIntoJob(started, n, notYet)
-            else notYet()
+            } else notYet()
         })
     }
 
@@ -1603,14 +1760,16 @@ Item {
         jobSeen = 0
         fetchProgress = 0
         started.asked = false
-        started.local = started.kind === "file" || started.kind === "text"
+        if (started.local === undefined)
+            started.local = started.kind === "file" || started.kind === "text"
         lastCallError = ""
         jobWatch.interval = fileJobTimeout(started)
         jobWatch.restart()
         if (started.path) jobPoll.start()
         else jobPoll.stop()
         log("fetch " + started.kind + " cid=" + started.cid
-            + (started.path ? (" path=" + started.path) : "") + " downloadToUrl")
+            + (started.path ? (" path=" + started.path) : "")
+            + (started.kind === "catalog" ? " downloadChunks" : " downloadToUrl"))
         startDownload(started)
     }
 
@@ -1624,6 +1783,21 @@ Item {
 
     function startDownload(started) {
         if (job !== started || started.asked) return
+        if (started.kind === "catalog") {
+            started.asked = true
+            started.local = false
+            log("fetch catalog cid=" + started.cid + " downloadChunks")
+            call("storage_module", "downloadChunks",
+                 [started.cid, false, Catalog.BLOCK, false, false], function (accepted) {
+                if (job !== started) return
+                if (accepted && accepted.ok) return
+                if (lastStorageNoise || Catalog.storageNoise(accepted, accepted && accepted.error))
+                    return
+                if (stillGoing(accepted)) return
+                finishJob(false, (accepted && accepted.error) || "The catalog could not be read.")
+            }, 60000)
+            return
+        }
         if (!started.path || started.path.charAt(0) !== "/" || Catalog.isGlobalTmp(started.path)) {
             openHoldThenFinish(started, "no dest")
             return
@@ -1631,9 +1805,12 @@ Item {
         started.asked = true
         function asked(accepted) {
             if (job !== started) return
+            if (accepted && accepted.ok) {
+                finishJob(true, "")
+                return
+            }
             openIfDestReady(started, function () {
                 if (job !== started) return
-                if (accepted && accepted.ok) return
                 if (lastStorageNoise || Catalog.storageNoise(accepted, accepted && accepted.error))
                     return
                 if (stillGoing(accepted)) return
@@ -1648,17 +1825,22 @@ Item {
 
     function openHoldThenFinish(started, why) {
         if (!started || job !== started) return
+        if (started.kind === "catalog") {
+            finishJob(false, why || "The catalog could not be read.")
+            return
+        }
+        var miss = readerWhy(why) || "Logos Storage could not find it."
         if (started.triedHold) {
-            finishJob(false, Catalog.CHOOSE_AGAIN)
+            finishJob(false, isMine(started.work) ? Catalog.CHOOSE_AGAIN : miss)
             return
         }
         started.triedHold = true
         var work = started.work
-        var want = work && work.size > 0 ? work.size : 0
-        if (!work || !files || typeof files.loadHold !== "function") {
-            finishJob(false, Catalog.CHOOSE_AGAIN)
+        if (!isMine(work) || !work || !files || typeof files.loadHold !== "function") {
+            finishJob(false, isMine(work) ? Catalog.CHOOSE_AGAIN : miss)
             return
         }
+        var want = work.size > 0 ? work.size : 0
         files.loadHold(work.cid, want, function (bytes) {
             if (job !== started) return
             if (Catalog.shareHit(bytes, want, work.filename)) {
@@ -1705,8 +1887,13 @@ Item {
                 finishJob(true, "")
                 return
             }
-            if (n > 0 && (want <= 0 || n >= want))
+            if (n > 0 && (want <= 0 || n >= want)) {
+                if (destPdfReady(n)) {
+                    finishJob(true, "")
+                    return
+                }
                 readDestIntoJob(started, n, function () {})
+            }
         })
     }
 
@@ -1783,6 +1970,10 @@ Item {
             files.stat(started.path, function (n) {
                 if (job !== started) return
                 if (n > 0 && (jobWant <= 0 || n >= jobWant)) {
+                    if (destPdfReady(n)) {
+                        finishJob(true, "")
+                        return
+                    }
                     readDestIntoJob(started, n, function () {
                         if (job !== started) return
                         openHoldThenFinish(started, lastCallError || "Logos Storage could not find it.")
@@ -1813,7 +2004,18 @@ Item {
         jobGrace.stop()
 
         if (done.kind === "catalog") {
-            log("ignore catalog " + done.cid)
+            var listed = ok ? Catalog.readCatalog(Catalog.utf8decode(bytes)) : null
+            if (listed)
+                applyCatalogList(listed, done.cid, done.deliveredAt)
+            else {
+                log("catalog " + done.cid + " could not be read: " + (why || "empty"))
+                if (done.cid)
+                    delete fetchedCatalogs[done.cid]
+            }
+        } else if (ok && done.path && done.work && Catalog.extensionOf(done.work.filename) === "pdf") {
+            openFromDest(done.work, done.path)
+            next()
+            return
         } else if (!ok) {
             if (saveAfter && saveAfter.work && done.work && saveAfter.work.id === done.work.id) {
                 var saveWhy = Catalog.alreadyInitialized(why) ? "Logos Storage could not find it."

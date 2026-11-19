@@ -47,6 +47,9 @@ WANT = re.compile(
 )
 COUNT_WANT = re.compile(r"count wanted ([A-Za-z0-9_]+) (\S+)")
 FETCH_DISK = re.compile(r"fetch disk cid=(\S+) path=(\S+)")
+OPEN_DEST = re.compile(r"(?:open dest|destFor) cid=(\S+) (?:path|dest)=(\S+)")
+DOWNLOAD_DEST = re.compile(r"fetch downloadToUrl local=false (\S+)")
+COVER_WANT = re.compile(r"cover wanted ([A-Za-z0-9_]+)")
 KEY_PDF = {}
 DONE = set()
 CURRENT = ""
@@ -71,19 +74,22 @@ def page_count(pdf):
     return len(re.findall(br"/Type\s*/Page(?![s])", data))
 
 
-def tiny_png(path):
+def tiny_png(path, width=1):
     import struct
     import zlib
+
+    n = max(1, min(int(width or 1), 10000))
 
     def chunk(tag, data):
         crc = zlib.crc32(tag + data) & 0xFFFFFFFF
         return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
 
-    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    raw = b"\x00" + (b"\xff\xff\xff" * n)
+    ihdr = struct.pack(">IIBBBBB", n, 1, 8, 2, 0, 0, 0)
     png = (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", ihdr)
-        + chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00", 9))
+        + chunk(b"IDAT", zlib.compress(raw, 9))
         + chunk(b"IEND", b"")
     )
     with open(path, "wb") as f:
@@ -99,15 +105,18 @@ def write_count(key, pdf):
         return 0
     txt = os.path.join(QML, "count-%s.txt" % key)
     marker = os.path.join(QML, "count-%s-%d.png" % (key, n))
+    rel = os.path.join(QML, "count-%s.png" % key)
     have_txt = os.path.isfile(txt)
     have_marker = os.path.isfile(marker)
-    if key in COUNTED and have_txt and have_marker:
+    have_rel = os.path.isfile(rel)
+    if key in COUNTED and have_txt and have_marker and have_rel:
         return n
     try:
         with open(txt, "w") as f:
             f.write(str(n))
         if not have_marker:
-            tiny_png(marker)
+            tiny_png(marker, 1)
+        tiny_png(rel, n)
     except OSError as e:
         log("count write fail", e)
         return 0
@@ -248,12 +257,27 @@ def want(key, n):
     raster(key, n + 1)
 
 
+def warm_covers():
+    src = sources_map()
+    for cid, path in src.items():
+        if not path or not os.path.isfile(path):
+            continue
+        key = re.sub(r"[^A-Za-z0-9_]", "", cid)[:200]
+        remember_pdf(key, path)
+        write_count(key, path)
+        raster(key, 0)
+        log("warm cover", key, os.path.basename(path))
+
+
 def scan(text):
+    for m in COVER_WANT.finditer(text):
+        want(m.group(1), 0)
     for m in COUNT_WANT.finditer(text):
         key, pdf = m.group(1), m.group(2)
         remember_pdf(key, pdf)
         write_count(key, pdf)
         write_count(key, pdf_for_key(key))
+        raster(key, 0)
     for m in FETCH_DISK.finditer(text):
         cid, pdf = m.group(1), m.group(2)
         key = re.sub(r"[^A-Za-z0-9_]", "", cid)[:200]
@@ -261,6 +285,16 @@ def scan(text):
         write_count(key, pdf)
         write_count(key, pdf_for_key(key))
         want(key, 0)
+    for m in OPEN_DEST.finditer(text):
+        cid, pdf = m.group(1), m.group(2)
+        key = re.sub(r"[^A-Za-z0-9_]", "", cid)[:200]
+        remember_pdf(key, pdf)
+        write_count(key, pdf)
+        want(key, 0)
+    for m in DOWNLOAD_DEST.finditer(text):
+        pdf = m.group(1)
+        if pdf and os.path.isfile(pdf):
+            remember_pdf(os.path.splitext(os.path.basename(pdf))[0], pdf)
     seen = set()
     for m in WANT.finditer(text):
         key, n = m.group(2), int(m.group(3))
@@ -285,6 +319,7 @@ def main():
     if not os.path.isfile(PPM):
         raise SystemExit("pdftoppm missing: " + PPM)
     log("raster start qml", QML, "ppm", PPM)
+    warm_covers()
     path = ""
     fh = None
     while True:

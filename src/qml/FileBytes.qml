@@ -352,92 +352,68 @@ Item {
     function countRel(cid) {
         var key = Catalog.holdName(cid)
         if (!key) return ""
-        return "count-" + key + ".txt"
+        return "count-" + key + ".png"
     }
 
     property var countJob: null
 
+    Image {
+        id: countMark
+        visible: false
+        asynchronous: false
+        cache: false
+        width: 1
+        height: 1
+        onStatusChanged: files._countReady()
+        onSourceSizeChanged: files._countReady()
+    }
+
     function readPageCount(cid, disk, done) {
         var key = Catalog.holdName(cid)
-        console.log("parallel-shelf: count wanted " + key + " " + (disk || ""))
-        files.countJob = { cid: cid, key: key, disk: disk || "", done: done, tries: 0 }
+        var rel = files.countRel(cid)
+        console.log("parallel-shelf: count wanted " + key + " " + (disk || "") + " rel=" + rel)
+        files.countJob = { cid: cid, key: key, disk: disk || "", done: done, rel: rel, tries: 0 }
+        countMark.source = ""
         countPoll.restart()
     }
 
-    function _countListed() {
+    function _countReady() {
         var job = files.countJob
-        var listing = countScan.item
         if (!job) return
-        var n = 0
-        var key = job.key
-        if (listing && listing.status === FolderListModel.Ready) {
-            var i
-            var prefix = "count-" + key + "-"
-            for (i = 0; i < listing.count; i++) {
-                var name = String(listing.get(i, "fileName") || "")
-                if (name.indexOf(prefix) !== 0 || name.indexOf(".png") < 0)
-                    continue
-                var mid = name.substring(prefix.length, name.length - 4)
-                var got = parseInt(mid, 10)
-                if (got > n)
-                    n = got
-            }
-        }
-        if (n > 1) {
-            files.countJob = null
-            countPoll.stop()
-            console.log("parallel-shelf: pageCount " + n + " cid=" + job.cid)
-            if (typeof job.done === "function")
-                job.done(n)
-            return
-        }
-        job.tries++
-        // A real disk PDF is never 1 page just because the sidecar
-        // marker is late (plugin reinstall wipes count-*-N.png). Keep
-        // polling. Accept n===1 only after the marker has had time.
-        if (n === 1 && job.tries > 40) {
-            files.countJob = null
-            countPoll.stop()
-            console.log("parallel-shelf: pageCount " + n + " cid=" + job.cid)
-            if (typeof job.done === "function")
-                job.done(n)
-            return
-        }
-        if (job.tries > 0 && job.tries % 50 === 0)
-            console.log("parallel-shelf: pageCount wait cid=" + job.cid + " tries=" + job.tries)
-        countPoll.restart()
+        if (countMark.status !== Image.Ready) return
+        var n = Math.floor(Number(countMark.sourceSize.width) || Number(countMark.implicitWidth) || 0)
+        if (n < 1) return
+        files.countJob = null
+        countPoll.stop()
+        countMark.source = ""
+        console.log("parallel-shelf: pageCount " + n + " cid=" + job.cid + " rel=" + job.rel)
+        if (typeof job.done === "function")
+            job.done(n)
     }
 
     Timer {
         id: countPoll
-        interval: 80
+        interval: 120
         repeat: false
         onTriggered: {
-            var dir = files.viewDir()
-            if (!dir) {
-                files._countListed()
+            var job = files.countJob
+            if (!job) return
+            job.tries++
+            if (job.tries > 0 && job.tries % 40 === 0)
+                console.log("parallel-shelf: pageCount wait cid=" + job.cid + " tries=" + job.tries)
+            var rel = job.rel
+            if (!rel || rel.indexOf("count-") !== 0) {
+                countPoll.restart()
                 return
             }
-            files.listDir = dir
-            countScan.active = false
-            countScan.sourceComponent = countFolderComp
-            countScan.active = true
+            countMark.source = ""
+            Qt.callLater(function () {
+                if (files.countJob !== job) return
+                countMark.source = rel
+            })
+            countPoll.restart()
         }
     }
-
-    Component {
-        id: countFolderComp
-        FolderListModel {
-            showFiles: true
-            showDirs: false
-            showDotAndDotDot: false
-            nameFilters: ["count-*.png"]
-            folder: "file://" + files.listDir
-            onStatusChanged: files._countListed()
-        }
-    }
-
-    Loader { id: countScan }
 
     function pageRel(cid, page) {
         var n = Math.max(0, Math.floor(Number(page) || 0))

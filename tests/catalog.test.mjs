@@ -99,11 +99,11 @@ test("a PDF in memory becomes reader pages without a dest file", () => {
   assert.equal(c.pdfDataUrl("%PDF-x").indexOf("data:application/pdf;base64,"), 0)
 })
 
-test("merging two shelves keeps every work once, newest first", () => {
+test("merging two shelves keeps every work once, oldest first", () => {
   const merged = c.merge([river], [night, river])
-  same(merged.map((w) => w.id), ["b2", "a1"])
-  assert.equal(merged[0].kind, "audiobook")
-  assert.equal(merged[1].kind, "book")
+  same(merged.map((w) => w.id), ["a1", "b2"])
+  assert.equal(merged[0].kind, "book")
+  assert.equal(merged[1].kind, "audiobook")
 })
 
 test("a later catalog cannot rewrite a work that is already listed", () => {

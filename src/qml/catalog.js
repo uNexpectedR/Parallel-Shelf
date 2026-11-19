@@ -197,6 +197,18 @@ function workNameKey(work) {
     return "name:" + title + "|" + author + "|" + kind
 }
 
+// Catalog addedAt, or a Delivery announce time. Waku timestamps may be ns/us.
+// Never Date.now() here — that would be when this install first saw the book.
+function stampAddedAt(value) {
+    if (value === null || value === undefined || value === "") return 0
+    var n = typeof value === "number" ? value : Number(value)
+    if (n !== n || n < 0) return 0
+    if (n > 1e16) n = Math.floor(n / 1e6)
+    else if (n > 1e14) n = Math.floor(n / 1e3)
+    if (n >= Date.now() + DAY_MS) return 0
+    return n
+}
+
 function takeWork(map, order, work, keepSource) {
     if (!work || typeof work !== "object") return
     var title = cleanText(work.title, TITLE_MAX)
@@ -205,10 +217,14 @@ function takeWork(map, order, work, keepSource) {
     var kind = kindOf(filename)
     var id = safeId(work.id)
     if (!title || !cid || !kind || !id) return
-    if (map[id] || map["cid:" + cid] || order.length >= WORKS_MAX) return
-    // A date far in the future would pin an entry to the top of the shelf.
-    var addedAt = typeof work.addedAt === "number" && work.addedAt >= 0 && work.addedAt < Date.now() + DAY_MS
-        ? work.addedAt : 0
+    var addedAt = stampAddedAt(work.addedAt)
+    var existing = map[id] || map["cid:" + cid]
+    if (existing) {
+        if (addedAt > 0 && (!existing.addedAt || addedAt < existing.addedAt))
+            existing.addedAt = addedAt
+        return
+    }
+    if (order.length >= WORKS_MAX) return
     var size = typeof work.size === "number" && work.size >= 0 ? work.size : 0
     var item = {
         id: id,
@@ -252,14 +268,28 @@ function merge(works, extra, keepSource) {
     }
     var next = []
     for (i = 0; i < order.length; i++) next.push(map[order[i]])
-    next.sort(function (a, b) {
-        if (b.addedAt !== a.addedAt) return b.addedAt - a.addedAt
-        if (a.title < b.title) return -1
-        if (a.title > b.title) return 1
-        if (a.id < b.id) return -1
-        if (a.id > b.id) return 1
-        return 0
+    return byAddTime(next)
+}
+
+// Oldest original add time first (catalog addedAt / Delivery announce).
+// Missing times stay after dated cards and keep their relative order —
+// not the order this install first fetched them.
+function byAddTime(list) {
+    var rows = []
+    var i
+    for (i = 0; i < (list || []).length; i++) {
+        if (list[i]) rows.push({ w: list[i], i: i })
+    }
+    rows.sort(function (a, b) {
+        var aa = stampAddedAt(a.w.addedAt)
+        var bb = stampAddedAt(b.w.addedAt)
+        if (aa && bb && aa !== bb) return aa - bb
+        if (aa && !bb) return -1
+        if (!aa && bb) return 1
+        return a.i - b.i
     })
+    var next = []
+    for (i = 0; i < rows.length; i++) next.push(rows[i].w)
     return next
 }
 
